@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NTUT Library Seat Booking System | 國立臺北科技大學圖書館座席預約系統</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ntut: {
+              navy: '#0C2340',
+              blue: '#0284C7',
+              sky: '#E0F2FE',
+              teal: '#0D9488',
+              wood: '#9A6B43',
+              'wood-light': '#FDF8F3',
+              'wood-border': '#E4D5C7',
+              'wood-dark': '#6B4423'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .seat-glow-selected { box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.45); }
+    @keyframes subtlePulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.85; transform: scale(0.98); } }
+    .pulse-checkin { animation: subtlePulse 2s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col antialiased selection:bg-ntut-blue selection:text-white">
+
+  <!-- Top Announcement Bar -->
+  <div class="bg-ntut-navy text-slate-200 text-xs py-1.5 px-4 flex justify-between items-center border-b border-slate-700/50">
+    <div class="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">NOTICE</span>
+      <span>期中考期間加開：2F 與 3F 自習室每日延長開放至 23:00。</span>
+    </div>
+    <div class="hidden sm:flex items-center gap-3 text-slate-300 text-xs">
+      <span id="db-status-badge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/10 text-[11px]">
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> 連線資料庫中...
+      </span>
+      <span class="text-slate-500">|</span>
+      <span class="flex items-center gap-1"><i data-lucide="clock" class="w-3.5 h-3.5"></i> 開館：08:00 - 22:00</span>
+      <span class="text-slate-500">|</span>
+      <span>學生證號：<strong id="topbar-student-id" class="text-white">110318042</strong></span>
+    </div>
+  </div>
+
+  <!-- Primary Header -->
+  <header class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="switchView('dashboard')">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-ntut-navy to-ntut-teal text-white flex items-center justify-center shadow-md font-bold text-lg border border-white/20">
+          NT
+        </div>
+        <div>
+          <div class="flex items-center gap-1.5">
+            <span class="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg">北科大圖書館</span>
+            <span class="text-[11px] font-semibold px-1.5 py-0.5 bg-ntut-wood-light text-ntut-wood-dark border border-ntut-wood-border rounded">座席預約 Cloud</span>
+          </div>
+          <p class="text-xs text-slate-500 font-medium">National Taipei University of Technology</p>
+        </div>
+      </div>
+
+      <nav class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+        <button id="nav-btn-dashboard" onclick="switchView('dashboard')" class="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all text-ntut-navy bg-white shadow-xs">
+          首頁總覽
+        </button>
+        <button id="nav-btn-booking" onclick="startBookingFlow('Area A')" class="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 transition-all">
+          線上預約
+        </button>
+        <button id="nav-btn-my-bookings" onclick="switchView('my-bookings')" class="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 transition-all relative">
+          我的預約
+          <span id="booking-badge-count" class="ml-1 px-1.5 py-0.2 bg-emerald-500 text-white text-[10px] font-bold rounded-full">0</span>
+        </button>
+      </nav>
+
+      <div class="flex items-center gap-3">
+        <button onclick="openStudentModal()" title="點擊切換學生帳號" class="flex items-center gap-2 pl-3 border-l border-slate-200 hover:opacity-80 transition-opacity">
+          <div id="header-avatar" class="w-8 h-8 rounded-full bg-ntut-wood text-white flex items-center justify-center font-bold text-xs ring-2 ring-ntut-wood-border">
+            王
+          </div>
+          <div class="hidden lg:block text-left leading-tight">
+            <div id="header-student-name" class="text-xs font-semibold text-slate-800 flex items-center gap-1">
+              王建豪 <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+            </div>
+            <div id="header-student-dept" class="text-[11px] text-slate-500">資訊工程學系</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- VIEW 1: DASHBOARD -->
+    <section id="view-dashboard" class="space-y-6">
+      <div class="relative overflow-hidden bg-gradient-to-r from-ntut-navy via-slate-900 to-slate-800 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
+        <div class="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div class="lg:col-span-7 space-y-3">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-xs text-sky-200">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Supabase 即時感測同步：總圖書館自修區域
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
+              <span id="welcome-name">建豪</span>，歡迎回來！<br>
+              <span class="text-slate-300 font-normal text-xl sm:text-2xl">即時查詢空位並快速預約您的專屬專注空間。</span>
+            </h1>
+            <p class="text-sm text-slate-300 max-w-xl">
+              結合無接觸 QR Code 報到、插座環境標記與 15 分鐘逾時自動釋出機制。
+            </p>
+            <div class="pt-2 flex flex-wrap gap-3">
+              <button onclick="startBookingFlow('Area A')" class="px-5 py-2.5 rounded-xl bg-ntut-blue hover:bg-sky-500 font-semibold text-sm transition-all shadow-lg flex items-center gap-2 active:scale-95">
+                <i data-lucide="compass" class="w-4 h-4"></i>
+                立即開始預約座位
+              </button>
+              <button onclick="switchView('my-bookings')" class="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 font-medium text-sm transition-all flex items-center gap-2">
+                <i data-lucide="ticket" class="w-4 h-4"></i>
+                查看我的預約紀錄 (<span id="banner-booking-count">0</span>)
+              </button>
+            </div>
+          </div>
+
+          <div class="lg:col-span-5 bg-white/10 backdrop-blur-md rounded-xl p-5 border border-white/15">
+            <div class="flex items-center justify-between pb-3 border-b border-white/10">
+              <span class="text-xs uppercase tracking-wider text-slate-300 font-semibold flex items-center gap-1.5">
+                <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i> 全館即時可劃位總覽
+              </span>
+              <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">空位充裕</span>
+            </div>
+
+            <div class="mt-4 flex items-baseline justify-between">
+              <div>
+                <span id="stat-available-total" class="text-4xl font-extrabold tracking-tight text-white">30</span>
+                <span class="text-lg text-slate-300"> / 30</span>
+                <div class="text-xs text-slate-300 mt-0.5">目前線上開放席次剩餘數</div>
+              </div>
+              <div class="text-right">
+                <span id="stat-available-pct" class="text-2xl font-bold text-emerald-400">100%</span>
+                <div class="text-xs text-slate-300">即時空位率</div>
+              </div>
+            </div>
+
+            <div class="mt-4 w-full bg-slate-700/60 rounded-full h-3 overflow-hidden p-0.5 border border-white/10">
+              <div id="stat-progress-bar" class="bg-gradient-to-r from-emerald-400 to-teal-300 h-full rounded-full transition-all duration-700" style="width: 100%;"></div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+              <div class="bg-black/20 p-2 rounded-lg">
+                <div class="text-slate-400 text-[10px]">使用中</div>
+                <div id="stat-inuse-count" class="font-bold text-white mt-0.5">0</div>
+              </div>
+              <div class="bg-black/20 p-2 rounded-lg">
+                <div class="text-slate-400 text-[10px]">已預約/待報到</div>
+                <div id="stat-pending-count" class="font-bold text-amber-300 mt-0.5">0</div>
+              </div>
+              <div class="bg-black/20 p-2 rounded-lg">
+                <div class="text-slate-400 text-[10px]">即時可劃位</div>
+                <div id="stat-free-count" class="font-bold text-emerald-300 mt-0.5">30</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">自習區域選擇</h2>
+            <p class="text-xs text-slate-500">點選目標分區即可檢視詳細座位平面圖與即時預約狀態</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div class="group bg-white rounded-xl border border-slate-200 hover:border-ntut-blue p-5 transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between">
+            <div class="absolute top-0 right-0 w-2 h-full bg-emerald-500"></div>
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-ntut-navy border border-blue-100">
+                  <i data-lucide="map-pin" class="w-3 h-3 text-ntut-blue"></i> 2F 西側自習區
+                </span>
+                <span id="area-a-badge" class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  剩餘 10 席
+                </span>
+              </div>
+              <h3 class="text-base font-bold text-slate-900 mt-3 group-hover:text-ntut-blue transition-colors">A區：一般自習區</h3>
+              <p class="text-xs text-slate-500 mt-1">寬敞原木長桌，自然採光良好，適合個人閱讀與筆記撰寫。</p>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded"><i data-lucide="sun" class="w-3 h-3 text-amber-500"></i> 靠窗採光</span>
+                <span class="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded"><i data-lucide="zap" class="w-3 h-3 text-amber-600"></i> 附電源插座</span>
+              </div>
+            </div>
+            <div class="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+              <span class="text-xs text-slate-500">線上開放：10 席</span>
+              <button onclick="startBookingFlow('Area A')" class="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-ntut-navy text-white text-xs font-medium transition-colors flex items-center gap-1">
+                選擇 A 區 <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="group bg-white rounded-xl border border-slate-200 hover:border-ntut-blue p-5 transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between">
+            <div class="absolute top-0 right-0 w-2 h-full bg-ntut-blue"></div>
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-sky-50 text-ntut-navy border border-sky-100">
+                  <i data-lucide="map-pin" class="w-3 h-3 text-ntut-blue"></i> 3F 電腦研習區
+                </span>
+                <span id="area-b-badge" class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  剩餘 10 席
+                </span>
+              </div>
+              <h3 class="text-base font-bold text-slate-900 mt-3 group-hover:text-ntut-blue transition-colors">B區：筆電/電繪專區</h3>
+              <p class="text-xs text-slate-500 mt-1">專屬工作站獨立電源與 USB-C 65W 快充，全區覆蓋 WiFi 6E 高速網路。</p>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="inline-flex items-center gap-1 text-[11px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded"><i data-lucide="zap" class="w-3 h-3 text-amber-600"></i> 雙插座+快充</span>
+                <span class="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded"><i data-lucide="wifi" class="w-3 h-3 text-ntut-blue"></i> WiFi 6E</span>
+              </div>
+            </div>
+            <div class="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+              <span class="text-xs text-slate-500">線上開放：10 席</span>
+              <button onclick="startBookingFlow('Area B')" class="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-ntut-navy text-white text-xs font-medium transition-colors flex items-center gap-1">
+                選擇 B 區 <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="group bg-white rounded-xl border border-slate-200 hover:border-ntut-blue p-5 transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between">
+            <div class="absolute top-0 right-0 w-2 h-full bg-amber-500"></div>
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-100">
+                  <i data-lucide="map-pin" class="w-3 h-3 text-amber-600"></i> 4F 深度靜音室
+                </span>
+                <span id="area-c-badge" class="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                  剩餘 10 席
+                </span>
+              </div>
+              <h3 class="text-base font-bold text-slate-900 mt-3 group-hover:text-ntut-blue transition-colors">C區：靜音個人隔間區</h3>
+              <p class="text-xs text-slate-500 mt-1">高隔板防干擾獨立包廂，嚴格禁止任何交談聲響，適合衝刺期中與論文寫作。</p>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="inline-flex items-center gap-1 text-[11px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded"><i data-lucide="volume-x" class="w-3 h-3 text-rose-600"></i> 嚴格靜音</span>
+                <span class="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded"><i data-lucide="shield" class="w-3 h-3 text-slate-500"></i> 隱私隔板</span>
+              </div>
+            </div>
+            <div class="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+              <span class="text-xs text-slate-500">線上開放：10 席</span>
+              <button onclick="startBookingFlow('Area C')" class="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-ntut-navy text-white text-xs font-medium transition-colors flex items-center gap-1">
+                選擇 C 區 <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2 & 3: BOOKING WIZARD -->
+    <section id="view-booking" class="hidden space-y-6">
+      <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <button onclick="switchView('dashboard')" class="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 mb-1 transition-colors">
+              <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> 返回首頁總覽
+            </button>
+            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+              自習室預約精靈：<span id="current-zone-label" class="text-ntut-blue">A區：一般自習區</span>
+            </h2>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <select id="zone-switcher" onchange="changeZone(this.value)" class="text-xs font-semibold border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-700">
+              <option value="Area A">A區：一般自習區</option>
+              <option value="Area B">B區：筆電/電繪專區</option>
+              <option value="Area C">C區：靜音個人隔間區</option>
+            </select>
+
+            <div id="step-pill-1" class="flex items-center gap-2 text-xs font-bold text-ntut-blue bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg">
+              <span class="w-5 h-5 rounded-full bg-ntut-blue text-white flex items-center justify-center text-[10px]">1</span>
+              <span>選擇日期與時段</span>
+            </div>
+            <div class="w-4 h-0.5 bg-slate-200"></div>
+            <div id="step-pill-2" class="flex items-center gap-2 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
+              <span class="w-5 h-5 rounded-full bg-slate-300 text-slate-600 flex items-center justify-center text-[10px]">2</span>
+              <span>平面圖劃位</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 1: DATE & TIME SELECTION -->
+      <div id="booking-step-1" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="calendar" class="w-4 h-4 text-ntut-wood"></i> 選擇預約日期
+            </h3>
+            <span id="calendar-month-label" class="text-xs font-semibold px-2.5 py-1 bg-slate-100 rounded text-slate-600">近 7 日開放預約</span>
+          </div>
+          <div id="calendar-grid" class="grid grid-cols-7 gap-2 text-center text-xs"></div>
+        </div>
+
+        <div class="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i data-lucide="clock" class="w-4 h-4 text-ntut-teal"></i> 選擇使用時段
+              </h3>
+              <span id="selected-date-badge" class="text-xs bg-ntut-wood-light text-ntut-wood-dark font-medium px-2 py-0.5 rounded border border-ntut-wood-border">
+                今天
+              </span>
+            </div>
+            <div id="time-slots-container" class="space-y-2.5"></div>
+          </div>
+
+          <div class="mt-6 pt-4 border-t border-slate-100 flex justify-end">
+            <button onclick="goToStep(2)" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-ntut-blue hover:bg-sky-600 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-md">
+              下一步：選擇平面圖座位 <i data-lucide="arrow-right" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2: INTERACTIVE SEAT MAP -->
+      <div id="booking-step-2" class="hidden space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div class="lg:col-span-8 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
+              <div>
+                <h3 class="text-sm font-bold text-slate-900">2D 座位俯視地圖（即時同步資料庫）</h3>
+                <p class="text-xs text-slate-500">點選綠色號碼牌進行劃位，灰色為已被其他同學預約或使用中</p>
+              </div>
+              <div class="flex items-center gap-3 text-xs">
+                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-500"></span>可預約</span>
+                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-slate-200 border border-slate-300"></span>已預約</span>
+                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-ntut-blue"></span>已選擇</span>
+                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-amber-200 border border-amber-400"></span>使用中</span>
+              </div>
+            </div>
+
+            <div class="mt-6 bg-slate-50 border border-slate-200 rounded-xl p-6 relative">
+              <div class="text-center text-xs font-bold text-slate-400 tracking-widest uppercase mb-4 py-1 bg-slate-200/60 rounded">
+                🪟 靠窗採光區 (WINDOW SIDE)
+              </div>
+              <div id="seat-map-grid" class="grid grid-cols-2 sm:grid-cols-5 gap-3 max-w-xl mx-auto"></div>
+              <div class="text-center text-xs font-bold text-slate-400 tracking-widest uppercase mt-6 py-1 bg-slate-200/60 rounded">
+                🚪 館內通道 / 飲水機入口 (ENTRANCE)
+              </div>
+            </div>
+          </div>
+
+          <div class="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 pb-3 border-b border-slate-100">預約項目確認</h3>
+              <div class="mt-4 space-y-3 text-xs">
+                <div class="flex justify-between py-1.5 border-b border-slate-50">
+                  <span class="text-slate-500">預約學號：</span>
+                  <span class="font-bold text-slate-800" id="summary-student">110318042 王建豪</span>
+                </div>
+                <div class="flex justify-between py-1.5 border-b border-slate-50">
+                  <span class="text-slate-500">預約區域：</span>
+                  <span class="font-bold text-slate-800" id="summary-zone">A區：一般自習區</span>
+                </div>
+                <div class="flex justify-between py-1.5 border-b border-slate-50">
+                  <span class="text-slate-500">預約日期：</span>
+                  <span class="font-bold text-slate-800" id="summary-date">-</span>
+                </div>
+                <div class="flex justify-between py-1.5 border-b border-slate-50">
+                  <span class="text-slate-500">使用時段：</span>
+                  <span class="font-bold text-ntut-blue" id="summary-time">14:00 - 17:00</span>
+                </div>
+                <div class="flex justify-between py-1.5 border-b border-slate-50">
+                  <span class="text-slate-500">所選座位：</span>
+                  <span class="font-extrabold text-base text-ntut-navy" id="summary-seat">尚未選擇座位</span>
+                </div>
+              </div>
+
+              <div class="mt-5 p-3 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-1">
+                <div class="font-bold flex items-center gap-1"><i data-lucide="alert-circle" class="w-3.5 h-3.5 text-amber-600"></i> 劃位規則提醒：</div>
+                <div>• 預約成功後請於時段開始 <strong>15 分鐘內</strong> 完成 QR Code 掃碼報到。</div>
+                <div>• 逾時未報到系統將自動取消預約並開放現場劃位。</div>
+              </div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-slate-100 flex gap-2">
+              <button onclick="goToStep(1)" class="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold text-xs">
+                返回重選
+              </button>
+              <button id="btn-submit-booking" onclick="confirmReservation()" class="flex-1 px-4 py-2.5 rounded-xl bg-ntut-blue hover:bg-sky-600 text-white font-semibold text-xs transition-all shadow-md text-center">
+                確認並送出預約
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: MY BOOKINGS -->
+    <section id="view-my-bookings" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-slate-900 tracking-tight">我的預約記錄面板</h2>
+          <p class="text-xs text-slate-500">檢視有效預約、掃碼報到或提前退席釋出座位（即時同步至雲端）</p>
+        </div>
+        <button onclick="startBookingFlow('Area A')" class="px-4 py-2 rounded-xl bg-ntut-blue hover:bg-sky-600 text-white text-xs font-semibold shadow-xs inline-flex items-center gap-1.5 self-start">
+          <i data-lucide="plus" class="w-4 h-4"></i> 新增座位預約
+        </button>
+      </div>
+
+      <div id="my-bookings-list" class="space-y-4"></div>
+
+      <div class="pt-4">
+        <h3 class="text-sm font-bold text-slate-700 mb-3">歷史與已結束紀錄</h3>
+        <div id="my-history-list" class="space-y-2.5"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL 1: QR CODE CHECK-IN -->
+  <div id="qr-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center pb-2 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">座位報到憑證</h3>
+        <button onclick="closeQRModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="py-2">
+        <div class="w-48 h-48 mx-auto bg-slate-900 rounded-xl p-3 flex items-center justify-center border-4 border-ntut-wood-border shadow-inner">
+          <div class="w-full h-full bg-white rounded p-2 flex flex-col items-center justify-center">
+            <i data-lucide="qr-code" class="w-32 h-32 text-slate-900"></i>
+            <span id="qr-code-text" class="text-[10px] font-mono text-slate-500 mt-1">NTUT-SEAT</span>
+          </div>
+        </div>
+      </div>
+      <div class="text-xs text-slate-600 space-y-1">
+        <div id="qr-seat-title" class="font-bold text-slate-800 text-sm">A區一般自習區 - A01號桌</div>
+        <div>請將手機畫面對準自習室門口 Kiosk 感應區</div>
+      </div>
+      <button onclick="completeCheckIn()" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md">
+        模擬感應報到成功
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL 2: SWITCH STUDENT ACCOUNT -->
+  <div id="student-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center pb-2 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900">切換學生身份（測試多人預約）</h3>
+        <button onclick="closeStudentModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">學號</label>
+          <input id="input-student-id" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-ntut-blue" placeholder="例如：114588018">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">姓名</label>
+          <input id="input-student-name" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-ntut-blue" placeholder="例如：林同學">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">系所</label>
+          <input id="input-student-dept" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-ntut-blue" placeholder="例如：互動設計系">
+        </div>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeStudentModal()" class="flex-1 py-2 rounded-xl border border-slate-300 text-slate-600 font-semibold text-xs">取消</button>
+        <button onclick="saveStudentProfile()" class="flex-1 py-2 rounded-xl bg-ntut-navy text-white font-semibold text-xs">儲存並切換</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl text-xs font-medium flex items-center gap-2 transition-all duration-300 translate-y-24 opacity-0 pointer-events-none">
+    <span id="toast-message">操作成功</span>
+  </div>
+
+  <script>
+    const cfg = window.APP_CONFIG || {};
+    const supabaseClient = (cfg.SUPABASE_URL && cfg.SUPABASE_PUBLISHABLE_KEY)
+      ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY)
+      : null;
+
+    const ZONE_INFO = {
+      'Area A': {
+        label: 'A區：一般自習區',
+        short: 'A區自習區',
+        badgeClass: 'bg-blue-100 text-ntut-navy',
+        seats: [
+          { id: 'A01', feature: '🔌 獨立插座' }, { id: 'A02', feature: '🔌 獨立插座' },
+          { id: 'A03', feature: '🪟 靠窗採光' }, { id: 'A04', feature: '🔌 獨立插座' },
+          { id: 'A05', feature: '🪟 靠窗採光' }, { id: 'A06', feature: '📖 標準原木桌' },
+          { id: 'A07', feature: '🔌 獨立插座' }, { id: 'A08', feature: '📖 標準原木桌' },
+          { id: 'A09', feature: '🔌 獨立插座' }, { id: 'A10', feature: '🪟 靠窗採光' }
+        ]
+      },
+      'Area B': {
+        label: 'B區：筆電/電繪專區',
+        short: 'B區電腦區',
+        badgeClass: 'bg-sky-100 text-ntut-navy',
+        seats: [
+          { id: 'B01', feature: '⚡ 雙插座+快充' }, { id: 'B02', feature: '⚡ 雙插座+快充' },
+          { id: 'B03', feature: '📶 WiFi 6E專區' }, { id: 'B04', feature: '⚡ 雙插座+快充' },
+          { id: 'B05', feature: '⚡ 雙插座+快充' }, { id: 'B06', feature: '🖥️ 寬幅電繪桌' },
+          { id: 'B07', feature: '⚡ 雙插座+快充' }, { id: 'B08', feature: '🖥️ 寬幅電繪桌' },
+          { id: 'B09', feature: '⚡ 雙插座+快充' }, { id: 'B10', feature: '📶 WiFi 6E專區' }
+        ]
+      },
+      'Area C': {
+        label: 'C區：靜音個人隔間區',
+        short: 'C區靜音室',
+        badgeClass: 'bg-amber-100 text-amber-900',
+        seats: [
+          { id: 'C01', feature: '🔇 嚴格靜音隔間' }, { id: 'C02', feature: '🔇 嚴格靜音隔間' },
+          { id: 'C03', feature: '🔌 隔間插座' }, { id: 'C04', feature: '🔇 嚴格靜音隔間' },
+          { id: 'C05', feature: '🔌 隔間插座' }, { id: 'C06', feature: '🔇 嚴格靜音隔間' },
+          { id: 'C07', feature: '🔌 隔間插座' }, { id: 'C08', feature: '🔇 嚴格靜音隔間' },
+          { id: 'C09', feature: '🔌 隔間插座' }, { id: 'C10', feature: '🔇 嚴格靜音隔間' }
+        ]
+      }
+    };
+
+    const TIME_SLOTS = [
+      { value: '08:00 - 11:00', title: '08:00 - 11:00 (早安時段)' },
+      { value: '11:00 - 14:00', title: '11:00 - 14:00 (午間時段)' },
+      { value: '14:00 - 17:00', title: '14:00 - 17:00 (午後專注)' },
+      { value: '17:00 - 20:00', title: '17:00 - 20:00 (傍晚時段)' }
+    ];
+
+    let currentStudent = JSON.parse(localStorage.getItem('ntut_student') || 'null') || {
+      id: '110318042',
+      name: '王建豪',
+      dept: '資訊工程學系'
+    };
+
+    let allBookings = [];
+    let selectedZone = 'Area A';
+    let selectedDate = '';
+    let selectedTimeSlot = '14:00 - 17:00';
+    let selectedSeatObj = null;
+    let activeQRBookingId = null;
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      renderStudentUI();
+      initDates();
+      lucide.createIcons();
+      await fetchBookingsFromSupabase();
+      subscribeRealtime();
+    });
+
+    function initDates() {
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+      const grid = document.getElementById('calendar-grid');
+      grid.innerHTML = weekdays.map(d => `<div class="text-slate-400 font-semibold py-1">${d}</div>`).join('');
+
+      const today = new Date();
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        const wd = weekdays[d.getDay()];
+        const dateStr = `${month}月${day}日 (${wd})`;
+        if (i === 0) selectedDate = dateStr;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = i === 0
+          ? "calendar-day-btn py-3 rounded-lg border border-ntut-blue bg-sky-50 text-ntut-navy font-bold relative shadow-xs"
+          : "calendar-day-btn py-3 rounded-lg border border-slate-200 hover:border-ntut-blue hover:bg-slate-50 text-slate-800";
+        btn.innerHTML = `${day}<span class="block text-[9px] ${i === 0 ? 'text-ntut-blue' : 'text-emerald-600'} font-normal">${i === 0 ? '今天' : '可預約'}</span>`;
+        btn.onclick = () => selectDate(dateStr, btn);
+        grid.appendChild(btn);
+      }
+
+      document.getElementById('selected-date-badge').innerText = selectedDate;
+      document.getElementById('summary-date').innerText = selectedDate;
+    }
+
+    async function fetchBookingsFromSupabase() {
+      const badge = document.getElementById('db-status-badge');
+      if (!supabaseClient) {
+        badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span> 尚未設定 config.js`;
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .from('bookings')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase fetch error:', error);
+        badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span> 資料庫連線異常`;
+        showToast('讀取資料庫失敗：' + error.message);
+        return;
+      }
+
+      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> 雲端資料庫已連線`;
+      allBookings = data || [];
+      refreshAllViews();
+    }
+
+    function subscribeRealtime() {
+      if (!supabaseClient) return;
+      supabaseClient
+        .channel('public:bookings')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
+          fetchBookingsFromSupabase();
+        })
+        .subscribe();
+    }
+
+    function refreshAllViews() {
+      updateDashboardStats();
+      renderTimeSlots();
+      renderSeatMap();
+      renderMyBookings();
+      lucide.createIcons();
+    }
+
+    function updateDashboardStats() {
+      const activeToday = allBookings.filter(b =>
+        b.booking_date === selectedDate && (b.status === 'pending' || b.status === 'in_use')
+      );
+      const inUseCount = activeToday.filter(b => b.status === 'in_use').length;
+      const pendingCount = activeToday.filter(b => b.status === 'pending').length;
+      const totalCapacity = 30;
+      const freeCount = Math.max(0, totalCapacity - activeToday.length);
+      const pct = Math.round((freeCount / totalCapacity) * 100);
+
+      document.getElementById('stat-available-total').innerText = freeCount;
+      document.getElementById('stat-available-pct').innerText = pct + '%';
+      document.getElementById('stat-progress-bar').style.width = pct + '%';
+      document.getElementById('stat-inuse-count').innerText = inUseCount;
+      document.getElementById('stat-pending-count').innerText = pendingCount;
+      document.getElementById('stat-free-count').innerText = freeCount;
+
+      const areaACount = 10 - activeToday.filter(b => b.area === 'Area A').length;
+      const areaBCount = 10 - activeToday.filter(b => b.area === 'Area B').length;
+      const areaCCount = 10 - activeToday.filter(b => b.area === 'Area C').length;
+      document.getElementById('area-a-badge').innerText = `剩餘 ${Math.max(0, areaACount)} 席`;
+      document.getElementById('area-b-badge').innerText = `剩餘 ${Math.max(0, areaBCount)} 席`;
+      document.getElementById('area-c-badge').innerText = `剩餘 ${Math.max(0, areaCCount)} 席`;
+
+      const myActive = allBookings.filter(b =>
+        b.student_id === currentStudent.id && (b.status === 'pending' || b.status === 'in_use')
+      );
+      document.getElementById('booking-badge-count').innerText = myActive.length;
+      document.getElementById('banner-booking-count').innerText = myActive.length;
+    }
+
+    function switchView(viewName) {
+      document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById('view-booking').classList.add('hidden');
+      document.getElementById('view-my-bookings').classList.add('hidden');
+
+      document.getElementById('nav-btn-dashboard').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900";
+      document.getElementById('nav-btn-booking').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900";
+      document.getElementById('nav-btn-my-bookings').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 relative";
+
+      if (viewName === 'dashboard') {
+        document.getElementById('view-dashboard').classList.remove('hidden');
+        document.getElementById('nav-btn-dashboard').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg text-ntut-navy bg-white shadow-xs";
+      } else if (viewName === 'my-bookings') {
+        document.getElementById('view-my-bookings').classList.remove('hidden');
+        document.getElementById('nav-btn-my-bookings').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg text-ntut-navy bg-white shadow-xs relative";
+        renderMyBookings();
+        lucide.createIcons();
+      }
+    }
+
+    function startBookingFlow(zoneKey) {
+      document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById('view-my-bookings').classList.add('hidden');
+      document.getElementById('view-booking').classList.remove('hidden');
+
+      document.getElementById('nav-btn-dashboard').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900";
+      document.getElementById('nav-btn-my-bookings').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 relative";
+      document.getElementById('nav-btn-booking').className = "px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg text-ntut-navy bg-white shadow-xs";
+
+      changeZone(zoneKey);
+      goToStep(1);
+    }
+
+    function changeZone(zoneKey) {
+      selectedZone = zoneKey;
+      selectedSeatObj = null;
+      document.getElementById('zone-switcher').value = zoneKey;
+      document.getElementById('current-zone-label').innerText = ZONE_INFO[zoneKey].label;
+      document.getElementById('summary-zone').innerText = ZONE_INFO[zoneKey].label;
+      document.getElementById('summary-seat').innerText = '尚未選擇座位';
+      renderTimeSlots();
+      renderSeatMap();
+    }
+
+    function selectDate(dateStr, btnElement) {
+      selectedDate = dateStr;
+      selectedSeatObj = null;
+      document.querySelectorAll('.calendar-day-btn').forEach(btn => {
+        btn.className = "calendar-day-btn py-3 rounded-lg border border-slate-200 hover:border-ntut-blue hover:bg-slate-50 text-slate-800";
+      });
+      btnElement.className = "calendar-day-btn py-3 rounded-lg border border-ntut-blue bg-sky-50 text-ntut-navy font-bold relative shadow-xs";
+      document.getElementById('selected-date-badge').innerText = dateStr;
+      document.getElementById('summary-date').innerText = dateStr;
+      document.getElementById('summary-seat').innerText = '尚未選擇座位';
+      renderTimeSlots();
+      renderSeatMap();
+    }
+
+    function renderTimeSlots() {
+      const container = document.getElementById('time-slots-container');
+      container.innerHTML = TIME_SLOTS.map(slot => {
+        const occupied = allBookings.filter(b =>
+          b.area === selectedZone &&
+          b.booking_date === selectedDate &&
+          b.time_slot === slot.value &&
+          (b.status === 'pending' || b.status === 'in_use')
+        ).length;
+        const left = Math.max(0, 10 - occupied);
+        const isSelected = selectedTimeSlot === slot.value;
+        const isFull = left === 0;
+
+        return `
+          <label onclick="${isFull ? '' : `selectTimeSlot('${slot.value}')`}" class="flex items-center justify-between p-3.5 rounded-xl border ${isSelected ? 'border-2 border-ntut-blue bg-sky-50/50' : 'border-slate-200 bg-slate-50'} ${isFull ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:border-ntut-blue'}">
+            <div class="flex items-center gap-3">
+              <input type="radio" name="time-slot" value="${slot.value}" ${isSelected ? 'checked' : ''} ${isFull ? 'disabled' : ''} class="text-ntut-blue focus:ring-ntut-blue h-4 w-4">
+              <div>
+                <div class="text-sm font-bold ${isFull ? 'text-slate-500 line-through' : 'text-slate-900'}">${slot.title}</div>
+                <div class="text-xs text-slate-500">時長：3 小時</div>
+              </div>
+            </div>
+            <span class="text-xs font-semibold ${isFull ? 'text-slate-500 bg-slate-200' : 'text-emerald-600 bg-emerald-50 border border-emerald-200'} px-2 py-0.5 rounded">
+              ${isFull ? '已額滿' : `剩 ${left} 席`}
+            </span>
+          </label>
+        `;
+      }).join('');
+    }
+
+    function selectTimeSlot(slotVal) {
+      selectedTimeSlot = slotVal;
+      selectedSeatObj = null;
+      document.getElementById('summary-time').innerText = slotVal;
+      document.getElementById('summary-seat').innerText = '尚未選擇座位';
+      renderTimeSlots();
+      renderSeatMap();
+    }
+
+    function goToStep(stepNum) {
+      if (stepNum === 1) {
+        document.getElementById('booking-step-1').classList.remove('hidden');
+        document.getElementById('booking-step-2').classList.add('hidden');
+        document.getElementById('step-pill-1').className = "flex items-center gap-2 text-xs font-bold text-ntut-blue bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg";
+        document.getElementById('step-pill-2').className = "flex items-center gap-2 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg";
+      } else {
+        document.getElementById('booking-step-1').classList.add('hidden');
+        document.getElementById('booking-step-2').classList.remove('hidden');
+        document.getElementById('step-pill-1').className = "flex items-center gap-2 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg";
+        document.getElementById('step-pill-2').className = "flex items-center gap-2 text-xs font-bold text-ntut-blue bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg";
+        renderSeatMap();
+      }
+    }
+
+    function renderSeatMap() {
+      const grid = document.getElementById('seat-map-grid');
+      const zoneSeats = ZONE_INFO[selectedZone].seats;
+      const slotBookings = allBookings.filter(b =>
+        b.area === selectedZone &&
+        b.booking_date === selectedDate &&
+        b.time_slot === selectedTimeSlot &&
+        (b.status === 'pending' || b.status === 'in_use')
+      );
+
+      grid.innerHTML = zoneSeats.map(seat => {
+        const existing = slotBookings.find(b => b.seat_id === seat.id);
+        if (existing) {
+          const isInUse = existing.status === 'in_use';
+          return `
+            <button disabled class="p-3 rounded-xl border ${isInUse ? 'border-amber-400 bg-amber-100 text-amber-800' : 'border-slate-200 bg-slate-200 text-slate-500'} font-bold text-xs flex flex-col items-center gap-1 opacity-75 cursor-not-allowed">
+              <span>${seat.id}</span>
+              <span class="text-[9px]">${isInUse ? '使用中' : '已預約'}</span>
+            </button>
+          `;
+        }
+
+        const isChosen = selectedSeatObj && selectedSeatObj.id === seat.id;
+        return `
+          <button type="button" onclick="selectSeat('${seat.id}')" class="seat-btn ${isChosen ? 'seat-glow-selected border-2 border-ntut-blue bg-ntut-blue text-white' : 'border border-emerald-400 bg-emerald-50 hover:bg-emerald-100 text-emerald-800'} p-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 transition-all">
+            <span>${seat.id}</span>
+            <span class="text-[9px] ${isChosen ? 'text-sky-100' : 'text-emerald-600'}">${isChosen ? '已選擇 ✓' : seat.feature}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function selectSeat(seatId) {
+      selectedSeatObj = ZONE_INFO[selectedZone].seats.find(s => s.id === seatId);
+      document.getElementById('summary-seat').innerText = `${seatId} 號桌 (${selectedSeatObj.feature})`;
+      renderSeatMap();
+    }
+
+    async function confirmReservation() {
+      if (!selectedSeatObj) {
+        showToast('⚠️ 請先在左側平面圖點選一個綠色可預約座位！');
+        return;
+      }
+      if (!supabaseClient) {
+        showToast('尚未設定 Supabase 連線資訊');
+        return;
+      }
+
+      const btn = document.getElementById('btn-submit-booking');
+      btn.disabled = true;
+      btn.innerText = '寫入資料庫中...';
+
+      const { error } = await supabaseClient.from('bookings').insert([{
+        student_id: currentStudent.id,
+        student_name: currentStudent.name,
+        department: currentStudent.dept,
+        area: selectedZone,
+        seat_id: selectedSeatObj.id,
+        seat_feature: selectedSeatObj.feature,
+        booking_date: selectedDate,
+        time_slot: selectedTimeSlot,
+        status: 'pending'
+      }]);
+
+      btn.disabled = false;
+      btn.innerText = '確認並送出預約';
+
+      if (error) {
+        console.error(error);
+        if (error.code === '23505') {
+          showToast('⚠️ 該座位剛剛已被其他同學搶先預約，請選擇其他座位！');
+          await fetchBookingsFromSupabase();
+        } else {
+          showToast('❌ 預約失敗：' + error.message);
+        }
+        return;
+      }
+
+      selectedSeatObj = null;
+      document.getElementById('summary-seat').innerText = '尚未選擇座位';
+      await fetchBookingsFromSupabase();
+      showToast('🎉 預約成功！資料已同步至 Supabase，請於 15 分鐘內完成掃碼報到。');
+      switchView('my-bookings');
+    }
+
+    function renderMyBookings() {
+      const myRows = allBookings.filter(b => b.student_id === currentStudent.id);
+      const activeRows = myRows.filter(b => b.status === 'pending' || b.status === 'in_use');
+      const historyRows = myRows.filter(b => b.status === 'completed' || b.status === 'cancelled');
+
+      const listEl = document.getElementById('my-bookings-list');
+      if (activeRows.length === 0) {
+        listEl.innerHTML = `
+          <div class="bg-white rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500 text-xs space-y-2">
+            <p class="text-sm font-semibold text-slate-700">目前沒有進行中的座位預約</p>
+            <p>點擊右上角「新增座位預約」即可立即劃位！</p>
+          </div>
+        `;
+      } else {
+        listEl.innerHTML = activeRows.map(b => {
+          const z = ZONE_INFO[b.area] || { short: b.area, badgeClass: 'bg-blue-100 text-ntut-navy' };
+          if (b.status === 'pending') {
+            return `
+              <div class="bg-white rounded-xl border-2 border-amber-300 p-5 shadow-sm relative overflow-hidden">
+                <div class="absolute top-0 right-0 bg-amber-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-lg flex items-center gap-1">
+                  <span class="w-2 h-2 rounded-full bg-white animate-ping"></span> 待報到 (請於15分鐘內感應)
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                  <div class="md:col-span-8 space-y-2">
+                    <div class="flex items-center gap-2">
+                      <span class="px-2.5 py-0.5 rounded text-xs font-bold ${z.badgeClass}">${z.short}</span>
+                      <span class="text-lg font-extrabold text-slate-900">${b.seat_id} 座位</span>
+                      <span class="text-xs text-slate-500">(${b.seat_feature || ''})</span>
+                    </div>
+                    <div class="text-xs text-slate-600 flex flex-wrap gap-4 pt-1">
+                      <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i> ${b.booking_date}</span>
+                      <span class="flex items-center gap-1 font-semibold text-ntut-blue"><i data-lucide="clock" class="w-3.5 h-3.5"></i> ${b.time_slot}</span>
+                      <span class="flex items-center gap-1 text-amber-700 font-bold"><i data-lucide="timer" class="w-3.5 h-3.5"></i> 狀態：等待現場報到</span>
+                    </div>
+                  </div>
+                  <div class="md:col-span-4 flex items-center justify-end gap-2 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                    <button onclick="openQRModal('${b.id}', '${z.short}', '${b.seat_id}')" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 pulse-checkin">
+                      <i data-lucide="qr-code" class="w-4 h-4"></i> 出示 QR Code 報到
+                    </button>
+                    <button onclick="cancelBooking('${b.id}')" class="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-600 text-xs font-medium">
+                      取消預約
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          } else {
+            return `
+              <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                  <div class="md:col-span-8 space-y-2">
+                    <div class="flex items-center gap-2">
+                      <span class="px-2.5 py-0.5 rounded text-xs font-bold ${z.badgeClass}">${z.short}</span>
+                      <span class="text-lg font-extrabold text-slate-900">${b.seat_id} 座位</span>
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">使用中</span>
+                    </div>
+                    <div class="text-xs text-slate-600 flex flex-wrap gap-4 pt-1">
+                      <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i> ${b.booking_date}</span>
+                      <span class="flex items-center gap-1 font-semibold text-ntut-blue"><i data-lucide="clock" class="w-3.5 h-3.5"></i> ${b.time_slot}</span>
+                    </div>
+                  </div>
+                  <div class="md:col-span-4 flex items-center justify-end gap-2 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                    <button onclick="earlyCheckout('${b.id}')" class="px-4 py-2 rounded-lg bg-slate-900 hover:bg-ntut-navy text-white text-xs font-medium transition-all flex items-center gap-1.5">
+                      <i data-lucide="log-out" class="w-4 h-4"></i> 提前退席釋出座位
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+        }).join('');
+      }
+
+      const historyEl = document.getElementById('my-history-list');
+      if (historyRows.length === 0) {
+        historyEl.innerHTML = `<div class="text-xs text-slate-400">尚無歷史紀錄</div>`;
+      } else {
+        historyEl.innerHTML = historyRows.slice(0, 10).map(b => {
+          const z = ZONE_INFO[b.area] || { short: b.area };
+          const statusLabel = b.status === 'completed' ? '已退席釋出' : '已取消';
+          return `
+            <div class="bg-white/70 rounded-lg border border-slate-200 px-4 py-2.5 flex items-center justify-between text-xs text-slate-500">
+              <div class="flex items-center gap-3">
+                <span class="font-bold text-slate-700">${z.short} ${b.seat_id}</span>
+                <span>${b.booking_date} ${b.time_slot}</span>
+              </div>
+              <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px]">${statusLabel}</span>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function openQRModal(bookingId, zoneShort, seatId) {
+      activeQRBookingId = bookingId;
+      document.getElementById('qr-seat-title').innerText = `${zoneShort} - ${seatId} 號桌`;
+      document.getElementById('qr-code-text').innerText = `NTUT-${seatId}-${currentStudent.id}`;
+      document.getElementById('qr-modal').classList.remove('hidden');
+    }
+
+    function closeQRModal() {
+      document.getElementById('qr-modal').classList.add('hidden');
+      activeQRBookingId = null;
+    }
+
+    async function completeCheckIn() {
+      if (!activeQRBookingId || !supabaseClient) return;
+      const { error } = await supabaseClient
+        .from('bookings')
+        .update({ status: 'in_use', checked_in_at: new Date().toISOString() })
+        .eq('id', activeQRBookingId);
+
+      closeQRModal();
+      if (error) {
+        showToast('❌ 報到失敗：' + error.message);
+        return;
+      }
+      await fetchBookingsFromSupabase();
+      showToast('✅ 報到成功！座位狀態已更新為「使用中」。');
+    }
+
+    async function earlyCheckout(bookingId) {
+      if (!confirm('確定要提前退席嗎？此操作將立即釋出座位供其他同學預約。')) return;
+      const { error } = await supabaseClient
+        .from('bookings')
+        .update({ status: 'completed' })
+        .eq('id', bookingId);
+
+      if (error) {
+        showToast('❌ 退席失敗：' + error.message);
+        return;
+      }
+      await fetchBookingsFromSupabase();
+      showToast('已順利退席並釋出座位，感謝您的配合！');
+    }
+
+    async function cancelBooking(bookingId) {
+      if (!confirm('確定取消該筆預約嗎？')) return;
+      const { error } = await supabaseClient
+        .from('bookings')
+        .update({ status: 'cancelled' })
+        .eq('id', bookingId);
+
+      if (error) {
+        showToast('❌ 取消失敗：' + error.message);
+        return;
+      }
+      await fetchBookingsFromSupabase();
+      showToast('預約已取消，座位已重新開放。');
+    }
+
+    function renderStudentUI() {
+      document.getElementById('topbar-student-id').innerText = currentStudent.id;
+      document.getElementById('header-avatar').innerText = currentStudent.name.charAt(0) || '學';
+      document.getElementById('header-student-name').innerHTML = `${currentStudent.name} <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>`;
+      document.getElementById('header-student-dept').innerText = currentStudent.dept;
+      document.getElementById('welcome-name').innerText = currentStudent.name.slice(-2);
+      document.getElementById('summary-student').innerText = `${currentStudent.id} ${currentStudent.name}`;
+    }
+
+    function openStudentModal() {
+      document.getElementById('input-student-id').value = currentStudent.id;
+      document.getElementById('input-student-name').value = currentStudent.name;
+      document.getElementById('input-student-dept').value = currentStudent.dept;
+      document.getElementById('student-modal').classList.remove('hidden');
+    }
+
+    function closeStudentModal() {
+      document.getElementById('student-modal').classList.add('hidden');
+    }
+
+    function saveStudentProfile() {
+      const id = document.getElementById('input-student-id').value.trim();
+      const name = document.getElementById('input-student-name').value.trim();
+      const dept = document.getElementById('input-student-dept').value.trim() || '資訊工程學系';
+      if (!id || !name) {
+        showToast('請輸入學號與姓名');
+        return;
+      }
+      currentStudent = { id, name, dept };
+      localStorage.setItem('ntut_student', JSON.stringify(currentStudent));
+      renderStudentUI();
+      refreshAllViews();
+      closeStudentModal();
+      showToast(`已切換學生身份：${name} (${id})`);
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-message').textContent = msg;
+      toast.classList.remove('translate-y-24', 'opacity-0', 'pointer-events-none');
+      setTimeout(() => {
+        toast.classList.add('translate-y-24', 'opacity-0', 'pointer-events-none');
+      }, 3500);
+    }
+  </script>
+</body>
+</html>
